@@ -1,0 +1,71 @@
+name: Build User APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Unique build ID'
+        required: true
+      user_code:
+        description: 'Base64 encoded Dart code'
+        required: true
+      app_name:
+        description: 'App name'
+        required: true
+        default: 'MyApp'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+          channel: 'stable'
+          cache: true
+      
+      - name: Verify Flutter
+        run: flutter --version
+      
+      - name: Create Flutter Project
+        run: |
+          flutter create --org com.nexusai --project-name myapp temp_app
+          cd temp_app
+          flutter pub get
+      
+      - name: Inject User Code
+        run: |
+          echo "${{ github.event.inputs.user_code }}" | base64 -d > temp_app/lib/main.dart
+          echo "=== main.dart content ==="
+          head -50 temp_app/lib/main.dart
+      
+      - name: Build APK
+        run: |
+          cd temp_app
+          flutter build apk --release
+      
+      - name: Rename APK
+        run: |
+          mv temp_app/build/app/outputs/flutter-apk/app-release.apk \
+             ${{ github.event.inputs.app_name }}-${{ github.event.inputs.build_id }}.apk
+          ls -lh *.apk
+      
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.event.inputs.build_id }}
+          path: ./*.apk
+          retention-days: 7
+      
+      - name: Build Summary
+        run: |
+          echo "## ✅ Build Successful" >> $GITHUB_STEP_SUMMARY
+          echo "**Build ID:** ${{ github.event.inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App Name:** ${{ github.event.inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact:** apk-${{ github.event.inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
