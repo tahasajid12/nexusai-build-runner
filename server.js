@@ -21,7 +21,8 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     service: 'NexusAI Build Server',
-    version: '1.0.0',
+    version: '2.0.0-multiframework',
+    frameworks: ['flutter', 'react-native', 'kotlin', 'java'],
     github: `${GITHUB_OWNER}/${GITHUB_REPO}`,
     timestamp: new Date().toISOString()
   });
@@ -30,7 +31,15 @@ app.get('/', (req, res) => {
 // Start build
 app.post('/api/build', async (req, res) => {
   try {
-    const { code, appName = 'MyApp' } = req.body;
+    const { code, appName = 'MyApp', framework = 'flutter' } = req.body;
+    
+    const validFrameworks = ['flutter', 'react-native', 'kotlin', 'java'];
+    if (!validFrameworks.includes(framework)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid framework. Use: ${validFrameworks.join(', ')}`
+      });
+    }
     
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
@@ -50,7 +59,7 @@ app.post('/api/build', async (req, res) => {
     const codeBase64 = Buffer.from(code).toString('base64');
     const safeAppName = appName.replace(/[^a-zA-Z0-9]/g, '') || 'MyApp';
     
-    console.log(`[${buildId}] Build: ${safeAppName}, ${code.length} bytes`);
+    console.log(`[${buildId}] ${framework}: ${safeAppName}, ${code.length} bytes`);
     
     await octokit.actions.createWorkflowDispatch({
       owner: GITHUB_OWNER,
@@ -60,7 +69,8 @@ app.post('/api/build', async (req, res) => {
       inputs: {
         build_id: buildId,
         user_code: codeBase64,
-        app_name: safeAppName
+        app_name: safeAppName,
+        framework: framework
       }
     });
     
@@ -68,7 +78,8 @@ app.post('/api/build', async (req, res) => {
       success: true,
       buildId,
       appName: safeAppName,
-      message: 'Build started',
+      framework,
+      message: `${framework} build started`,
       statusUrl: `/api/build/${buildId}/status`
     });
     
@@ -128,11 +139,7 @@ app.get('/api/build/:buildId/status', async (req, res) => {
     }
     
     res.json({
-      status,
-      buildId,
-      progress,
-      downloadUrl,
-      artifactName,
+      status, buildId, progress, downloadUrl, artifactName,
       runUrl: run.html_url,
       startedAt: run.created_at,
       updatedAt: run.updated_at
@@ -169,9 +176,22 @@ app.get('/api/builds', async (req, res) => {
   }
 });
 
+// List supported frameworks
+app.get('/api/frameworks', (req, res) => {
+  res.json({
+    frameworks: [
+      { id: 'flutter', name: 'Flutter', language: 'Dart', status: 'stable' },
+      { id: 'react-native', name: 'React Native', language: 'TypeScript', status: 'stable' },
+      { id: 'kotlin', name: 'Kotlin', language: 'Kotlin', status: 'stable' },
+      { id: 'java', name: 'Java', language: 'Java', status: 'stable' }
+    ]
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 NexusAI Build Server on port ${PORT}`);
+  console.log(`🚀 NexusAI Build Server v2.0 (Multi-Framework)`);
+  console.log(`   Port: ${PORT}`);
   console.log(`   GitHub: ${GITHUB_OWNER}/${GITHUB_REPO}`);
-  console.log(`   Token: ${GITHUB_TOKEN ? '✓' : '✗'}`);
+  console.log(`   Frameworks: flutter, react-native, kotlin, java`);
 });
