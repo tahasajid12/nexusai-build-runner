@@ -1,4 +1,4 @@
-name: Build User APK
+name: Build User App
 
 on:
   workflow_dispatch:
@@ -7,65 +7,272 @@ on:
         description: 'Unique build ID'
         required: true
       user_code:
-        description: 'Base64 encoded Dart code'
+        description: 'Base64 encoded source code'
         required: true
       app_name:
         description: 'App name'
         required: true
         default: 'MyApp'
+      framework:
+        description: 'Framework'
+        required: true
+        default: 'flutter'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      contents: write
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
       
+      - name: Decode User Code
+        run: |
+          echo "${{ github.event.inputs.user_code }}" | base64 -d > /tmp/user_code.txt
+          echo "Code size: $(wc -c < /tmp/user_code.txt) bytes"
+          echo "Framework: ${{ github.event.inputs.framework }}"
+      
+      # ============ FLUTTER ============
       - name: Setup Flutter
+        if: github.event.inputs.framework == 'flutter'
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
           cache: true
       
-      - name: Verify Flutter
-        run: flutter --version
-      
-      - name: Create Flutter Project
+      - name: Build Flutter App
+        if: github.event.inputs.framework == 'flutter'
         run: |
           flutter create --org com.nexusai --project-name myapp temp_app
           cd temp_app
           flutter pub get
-      
-      - name: Inject User Code
-        run: |
-          echo "${{ github.event.inputs.user_code }}" | base64 -d > temp_app/lib/main.dart
-          echo "=== main.dart content ==="
-          head -50 temp_app/lib/main.dart
-      
-      - name: Build APK
-        run: |
-          cd temp_app
+          cp /tmp/user_code.txt lib/main.dart
           flutter build apk --release
+          mv build/app/outputs/flutter-apk/app-release.apk ../${{ github.event.inputs.app_name }}.apk
       
-      - name: Rename APK
+      # ============ REACT NATIVE ============
+      - name: Setup Node.js
+        if: github.event.inputs.framework == 'react-native'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Setup Java for RN
+        if: github.event.inputs.framework == 'react-native'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Build React Native App
+        if: github.event.inputs.framework == 'react-native'
         run: |
-          mv temp_app/build/app/outputs/flutter-apk/app-release.apk \
-             ${{ github.event.inputs.app_name }}-${{ github.event.inputs.build_id }}.apk
-          ls -lh *.apk
+          npx react-native@latest init TempApp --version 0.74.0
+          cd TempApp
+          cp /tmp/user_code.txt App.tsx
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          mv app/build/outputs/apk/release/app-release.apk ../../${{ github.event.inputs.app_name }}.apk
       
-      - name: Upload APK Artifact
+      # ============ KOTLIN / JAVA ============
+      - name: Setup Java for Native
+        if: github.event.inputs.framework == 'kotlin' || github.event.inputs.framework == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Android SDK
+        if: github.event.inputs.framework == 'kotlin' || github.event.inputs.framework == 'java'
+        uses: android-actions/setup-android@v3
+      
+      - name: Build Kotlin App
+        if: github.event.inputs.framework == 'kotlin'
+        run: |
+          mkdir -p kotlin_app/app/src/main/java/com/nexusai/app
+          cd kotlin_app
+          cp /tmp/user_code.txt app/src/main/java/com/nexusai/app/MainActivity.kt
+          
+          echo "include ':app'" > settings.gradle
+          
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.0'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20'
+              }
+          }
+          allprojects {
+              repositories { google(); mavenCentral() }
+          }
+          EOF
+          
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.nexusai.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.nexusai.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
+          EOF
+          
+          echo "android.useAndroidX=true" > gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="MyApp" android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          
+          gradle wrapper --gradle-version 8.2
+          ./gradlew assembleRelease
+          mv app/build/outputs/apk/release/app-release-unsigned.apk ../${{ github.event.inputs.app_name }}.apk
+      
+      - name: Build Java App
+        if: github.event.inputs.framework == 'java'
+        run: |
+          mkdir -p java_app/app/src/main/java/com/nexusai/app
+          cd java_app
+          cp /tmp/user_code.txt app/src/main/java/com/nexusai/app/MainActivity.java
+          
+          echo "include ':app'" > settings.gradle
+          
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.0'
+              }
+          }
+          allprojects {
+              repositories { google(); mavenCentral() }
+          }
+          EOF
+          
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.nexusai.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.nexusai.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+          }
+          EOF
+          
+          echo "android.useAndroidX=true" > gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="MyApp" android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          
+          gradle wrapper --gradle-version 8.2
+          ./gradlew assembleRelease
+          mv app/build/outputs/apk/release/app-release-unsigned.apk ../${{ github.event.inputs.app_name }}.apk
+      
+      # ============ UPLOAD ============
+      - name: List APK
+        run: ls -lh *.apk || echo "No APK found"
+      
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ github.event.inputs.build_id }}
           path: ./*.apk
           retention-days: 7
+          if-no-files-found: error
+      
+      - name: Create Release
+        if: success()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.event.inputs.build_id }}
+          name: ${{ github.event.inputs.app_name }} - ${{ github.event.inputs.framework }}
+          body: |
+            **App:** ${{ github.event.inputs.app_name }}
+            **Framework:** ${{ github.event.inputs.framework }}
+            **Build ID:** ${{ github.event.inputs.build_id }}
+            Built via NexusAI Studio
+          files: ./*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Build Summary
         run: |
           echo "## ✅ Build Successful" >> $GITHUB_STEP_SUMMARY
-          echo "**Build ID:** ${{ github.event.inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "**App Name:** ${{ github.event.inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Artifact:** apk-${{ github.event.inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Framework:** ${{ github.event.inputs.framework }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App:** ${{ github.event.inputs.app_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Download:** https://github.com/${{ github.repository }}/releases/tag/build-${{ github.event.inputs.build_id }}" >> $GITHUB_STEP_SUMMARY
