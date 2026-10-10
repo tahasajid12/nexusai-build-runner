@@ -21,7 +21,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     service: 'NexusAI Build Server',
-    version: '2.0.0-multiframework',
+    version: '2.1.0',
     frameworks: ['flutter', 'react-native', 'kotlin', 'java'],
     github: `${GITHUB_OWNER}/${GITHUB_REPO}`,
     timestamp: new Date().toISOString()
@@ -117,11 +117,34 @@ app.get('/api/build/:buildId/status', async (req, res) => {
       else { status = 'failed'; progress = 0; }
     }
     
+    // ✅ FIXED: Release URL from GitHub releases
     let downloadUrl = null;
     let artifactName = null;
+    let releaseUrl = null;
     
     if (status === 'success') {
       try {
+        // Get the release tag for this build
+        const tagName = `build-${buildId}`;
+        
+        // Try to get release info
+        try {
+          const release = await octokit.repos.getReleaseByTag({
+            owner: GITHUB_OWNER,
+            repo: GITHUB_REPO,
+            tag: tagName
+          });
+          
+          // Find APK asset in release
+          const apkAsset = release.data.assets.find(a => a.name.endsWith('.apk'));
+          if (apkAsset) {
+            releaseUrl = apkAsset.browser_download_url;
+          }
+        } catch (releaseErr) {
+          console.log('Release not found, falling back to artifact:', releaseErr.message);
+        }
+        
+        // Also get artifact as backup
         const artifacts = await octokit.actions.listWorkflowRunArtifacts({
           owner: GITHUB_OWNER,
           repo: GITHUB_REPO,
@@ -131,15 +154,18 @@ app.get('/api/build/:buildId/status', async (req, res) => {
         if (artifacts.data.artifacts.length > 0) {
           const artifact = artifacts.data.artifacts[0];
           artifactName = artifact.name;
-          downloadUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${run.id}/artifacts/${artifact.id}`;
         }
       } catch (e) {
-        console.error('Artifact error:', e.message);
+        console.error('Artifact/Release error:', e.message);
       }
     }
     
     res.json({
-      status, buildId, progress, downloadUrl, artifactName,
+      status,
+      buildId,
+      progress,
+      downloadUrl: releaseUrl,
+      artifactName,
       runUrl: run.html_url,
       startedAt: run.created_at,
       updatedAt: run.updated_at
@@ -188,9 +214,44 @@ app.get('/api/frameworks', (req, res) => {
   });
 });
 
+// ✅ NEW: Get release info for a build
+app.get('/api/build/:buildId/release', async (req, res) => {
+  try {
+    const { buildId } = req.params;
+    const tagName = `build-${buildId}`;
+    
+    const release = await octokit.repos.getReleaseByTag({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      tag: tagName
+    });
+    
+    const assets = release.data.assets.map(a => ({
+      name: a.name,
+      size: a.size,
+      downloadUrl: a.browser_download_url
+    }));
+    
+    res.json({
+      success: true,
+      tag: release.data.tag_name,
+      name: release.data.name,
+      publishedAt: release.data.published_at,
+      assets,
+      apkUrl: assets.find(a => a.name.endsWith('.apk'))?.downloadUrl || null
+    });
+    
+  } catch (err) {
+    res.status(404).json({ 
+      success: false, 
+      error: 'Release not found: ' + err.message 
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 NexusAI Build Server v2.0 (Multi-Framework)`);
+  console.log(`🚀 NexusAI Build Server v2.1`);
   console.log(`   Port: ${PORT}`);
   console.log(`   GitHub: ${GITHUB_OWNER}/${GITHUB_REPO}`);
   console.log(`   Frameworks: flutter, react-native, kotlin, java`);
