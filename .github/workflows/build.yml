@@ -17,6 +17,10 @@ on:
         description: 'Framework'
         required: true
         default: 'flutter'
+      packages:
+        description: 'Base64 encoded packages list (one per line)'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -35,6 +39,13 @@ jobs:
           echo "Code size: $(wc -c < /tmp/user_code.txt) bytes"
           echo "Framework: ${{ github.event.inputs.framework }}"
       
+      - name: Decode Packages
+        run: |
+          echo "${{ github.event.inputs.packages }}" | base64 -d > /tmp/packages.txt
+          echo "=== Required packages ==="
+          cat /tmp/packages.txt
+          echo "=== End packages ==="
+      
       # ============ FLUTTER ============
       - name: Setup Flutter
         if: github.event.inputs.framework == 'flutter'
@@ -49,6 +60,19 @@ jobs:
         run: |
           flutter create --org com.nexusai --project-name myapp temp_app
           cd temp_app
+          
+          if [ -s /tmp/packages.txt ]; then
+            echo "" >> pubspec.yaml
+            echo "  # Custom packages" >> pubspec.yaml
+            cat /tmp/packages.txt >> pubspec.yaml
+            echo "✅ Packages added to pubspec.yaml"
+          else
+            echo "ℹ️ No extra packages needed"
+          fi
+          
+          echo "=== Final pubspec.yaml dependencies ==="
+          head -40 pubspec.yaml
+          
           flutter pub get
           cp /tmp/user_code.txt lib/main.dart
           flutter build apk --release
@@ -73,6 +97,16 @@ jobs:
         run: |
           npx react-native@latest init TempApp --version 0.74.0
           cd TempApp
+          
+          if [ -s /tmp/packages.txt ]; then
+            echo "Installing packages..."
+            while read -r pkg; do
+              if [ -n "$pkg" ]; then
+                npm install "$pkg" 2>/dev/null || echo "Failed: $pkg"
+              fi
+            done < /tmp/packages.txt
+          fi
+          
           cp /tmp/user_code.txt App.tsx
           cd android
           chmod +x gradlew
