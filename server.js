@@ -21,8 +21,9 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     service: 'NexusAI Build Server',
-    version: '2.2.0',
-    frameworks: ['flutter', 'react-native', 'kotlin', 'java'],
+    version: '2.3.0',
+    defaultFramework: 'react-native',
+    frameworks: ['react-native', 'flutter', 'kotlin', 'java'],
     features: ['dynamic-packages', 'multi-framework', 'release-download'],
     github: `${GITHUB_OWNER}/${GITHUB_REPO}`,
     timestamp: new Date().toISOString()
@@ -32,9 +33,10 @@ app.get('/', (req, res) => {
 // Start build
 app.post('/api/build', async (req, res) => {
   try {
-    const { code, appName = 'MyApp', framework = 'flutter', packages = [] } = req.body;
+    // ✅ React Native default
+    const { code, appName = 'MyApp', framework = 'react-native', packages = [] } = req.body;
     
-    const validFrameworks = ['flutter', 'react-native', 'kotlin', 'java'];
+    const validFrameworks = ['react-native', 'flutter', 'kotlin', 'java'];
     if (!validFrameworks.includes(framework)) {
       return res.status(400).json({
         success: false,
@@ -207,11 +209,40 @@ app.get('/api/builds', async (req, res) => {
 // List supported frameworks
 app.get('/api/frameworks', (req, res) => {
   res.json({
+    default: 'react-native',
     frameworks: [
-      { id: 'flutter', name: 'Flutter', language: 'Dart', status: 'stable', supportsPackages: true },
-      { id: 'react-native', name: 'React Native', language: 'TypeScript', status: 'stable', supportsPackages: true },
-      { id: 'kotlin', name: 'Kotlin', language: 'Kotlin', status: 'stable', supportsPackages: false },
-      { id: 'java', name: 'Java', language: 'Java', status: 'stable', supportsPackages: false }
+      { 
+        id: 'react-native', 
+        name: 'React Native', 
+        language: 'TypeScript', 
+        status: 'stable', 
+        supportsPackages: true,
+        recommended: true
+      },
+      { 
+        id: 'flutter', 
+        name: 'Flutter', 
+        language: 'Dart', 
+        status: 'stable', 
+        supportsPackages: true,
+        recommended: false
+      },
+      { 
+        id: 'kotlin', 
+        name: 'Kotlin', 
+        language: 'Kotlin', 
+        status: 'stable', 
+        supportsPackages: false,
+        recommended: false
+      },
+      { 
+        id: 'java', 
+        name: 'Java', 
+        language: 'Java', 
+        status: 'stable', 
+        supportsPackages: false,
+        recommended: false
+      }
     ]
   });
 });
@@ -253,9 +284,10 @@ app.get('/api/build/:buildId/release', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 NexusAI Build Server v2.2 (Dynamic Packages)`);
+  console.log(`🚀 NexusAI Build Server v2.3 (React Native Default)`);
   console.log(`   Port: ${PORT}`);
   console.log(`   GitHub: ${GITHUB_OWNER}/${GITHUB_REPO}`);
-  console.log(`   Frameworks: flutter, react-native, kotlin, java`);
+  console.log(`   Default Framework: react-native`);
+  console.log(`   Frameworks: react-native, flutter, kotlin, java`);
   console.log(`   Features: dynamic-packages, multi-framework, release-download`);
 });
