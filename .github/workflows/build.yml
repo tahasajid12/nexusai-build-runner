@@ -14,9 +14,9 @@ on:
         required: true
         default: 'MyApp'
       framework:
-        description: 'Framework'
+        description: 'Framework (react-native default)'
         required: true
-        default: 'flutter'
+        default: 'react-native'
       packages:
         description: 'Base64 encoded packages list (one per line)'
         required: false
@@ -46,7 +46,53 @@ jobs:
           cat /tmp/packages.txt
           echo "=== End packages ==="
       
-      # ============ FLUTTER ============
+      # ============ REACT NATIVE (DEFAULT) ============
+      - name: Setup Node.js
+        if: github.event.inputs.framework == 'react-native'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Setup Java for RN
+        if: github.event.inputs.framework == 'react-native'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Build React Native App
+        if: github.event.inputs.framework == 'react-native'
+        run: |
+          echo "📱 Creating React Native project..."
+          npx react-native@latest init TempApp --version 0.74.0 --skip-install
+          cd TempApp
+          
+          echo "📦 Installing base dependencies..."
+          npm install
+          
+          # Add custom packages
+          if [ -s /tmp/packages.txt ]; then
+            echo "📦 Installing custom packages..."
+            while IFS= read -r pkg; do
+              if [ -n "$pkg" ] && [[ ! "$pkg" =~ ^# ]]; then
+                echo "  Installing: $pkg"
+                npm install "$pkg" 2>/dev/null || echo "  ⚠️ Failed: $pkg"
+              fi
+            done < /tmp/packages.txt
+          fi
+          
+          echo "📝 Injecting user code..."
+          cp /tmp/user_code.txt App.tsx
+          
+          echo "🔨 Building APK..."
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          
+          echo "📤 Moving APK..."
+          mv app/build/outputs/apk/release/app-release.apk ../../${{ github.event.inputs.app_name }}.apk
+      
+      # ============ FLUTTER (OPTIONAL) ============
       - name: Setup Flutter
         if: github.event.inputs.framework == 'flutter'
         uses: subosito/flutter-action@v2
@@ -65,53 +111,12 @@ jobs:
             echo "" >> pubspec.yaml
             echo "  # Custom packages" >> pubspec.yaml
             cat /tmp/packages.txt >> pubspec.yaml
-            echo "✅ Packages added to pubspec.yaml"
-          else
-            echo "ℹ️ No extra packages needed"
           fi
-          
-          echo "=== Final pubspec.yaml dependencies ==="
-          head -40 pubspec.yaml
           
           flutter pub get
           cp /tmp/user_code.txt lib/main.dart
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk ../${{ github.event.inputs.app_name }}.apk
-      
-      # ============ REACT NATIVE ============
-      - name: Setup Node.js
-        if: github.event.inputs.framework == 'react-native'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Setup Java for RN
-        if: github.event.inputs.framework == 'react-native'
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      
-      - name: Build React Native App
-        if: github.event.inputs.framework == 'react-native'
-        run: |
-          npx react-native@latest init TempApp --version 0.74.0
-          cd TempApp
-          
-          if [ -s /tmp/packages.txt ]; then
-            echo "Installing packages..."
-            while read -r pkg; do
-              if [ -n "$pkg" ]; then
-                npm install "$pkg" 2>/dev/null || echo "Failed: $pkg"
-              fi
-            done < /tmp/packages.txt
-          fi
-          
-          cp /tmp/user_code.txt App.tsx
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
-          mv app/build/outputs/apk/release/app-release.apk ../../${{ github.event.inputs.app_name }}.apk
       
       # ============ KOTLIN / JAVA ============
       - name: Setup Java for Native
