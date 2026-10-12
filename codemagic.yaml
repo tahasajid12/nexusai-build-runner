@@ -1,0 +1,89 @@
+workflows:
+  flutter-workflow:
+    name: Flutter Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: stable
+      vars:
+        USER_CODE: ""
+        APP_NAME: "MyApp"
+        PACKAGES: ""
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+    scripts:
+      - name: Setup Flutter project
+        script: |
+          echo "📱 Creating Flutter project..."
+          flutter create --org com.nexusai --project-name myapp temp_app
+          cd temp_app
+          
+          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "[]" ]; then
+            echo "📦 Adding packages..."
+            echo "$PACKAGES" | base64 -d > /tmp/packages.txt 2>/dev/null || true
+            if [ -s /tmp/packages.txt ]; then
+              echo "" >> pubspec.yaml
+              echo "  # Custom packages" >> pubspec.yaml
+              cat /tmp/packages.txt >> pubspec.yaml
+            fi
+          fi
+          
+          flutter pub get
+      - name: Inject user code
+        script: |
+          echo "📝 Injecting user code..."
+          echo "$USER_CODE" | base64 -d > temp_app/lib/main.dart
+      - name: Build APK
+        script: |
+          echo "🔨 Building APK..."
+          cd temp_app
+          flutter build apk --release
+          echo "✅ APK built!"
+    artifacts:
+      - temp_app/build/app/outputs/flutter-apk/*.apk
+
+  rn-workflow:
+    name: React Native Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      node: 20
+      java: 17
+      vars:
+        USER_CODE: ""
+        APP_NAME: "MyApp"
+        PACKAGES: ""
+    cache:
+      cache_paths:
+        - $HOME/.npm
+    scripts:
+      - name: Setup RN project
+        script: |
+          echo "📱 Creating React Native project..."
+          npx @react-native-community/cli@latest init TempApp --version 0.74.5 --skip-install --install-pods false
+          cd TempApp
+          npm install --legacy-peer-deps
+          
+          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "[]" ]; then
+            echo "📦 Installing custom packages..."
+            echo "$PACKAGES" | base64 -d > /tmp/packages.txt 2>/dev/null || true
+            if [ -s /tmp/packages.txt ]; then
+              while IFS= read -r pkg; do
+                if [ -n "$pkg" ]; then
+                  echo "  Installing: $pkg"
+                  npm install "$pkg" --legacy-peer-deps 2>/dev/null || echo "  ⚠️ Failed: $pkg"
+                fi
+              done < /tmp/packages.txt
+            fi
+          fi
+      - name: Inject user code
+        script: |
+          echo "$USER_CODE" | base64 -d > TempApp/App.tsx
+      - name: Build APK
+        script: |
+          cd TempApp/android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+    artifacts:
+      - TempApp/android/app/build/outputs/apk/release/*.apk
