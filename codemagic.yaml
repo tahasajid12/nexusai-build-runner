@@ -6,9 +6,9 @@ workflows:
     environment:
       flutter: stable
       vars:
-        USER_CODE: ""
+        USER_CODE: "placeholder"
         APP_NAME: "MyApp"
-        PACKAGES: ""
+        PACKAGES: "placeholder"
     cache:
       cache_paths:
         - $HOME/.pub-cache
@@ -19,7 +19,7 @@ workflows:
           flutter create --org com.nexusai --project-name myapp temp_app
           cd temp_app
           
-          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "[]" ]; then
+          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "placeholder" ]; then
             echo "📦 Adding packages..."
             echo "$PACKAGES" | base64 -d > /tmp/packages.txt 2>/dev/null || true
             if [ -s /tmp/packages.txt ]; then
@@ -51,9 +51,9 @@ workflows:
       node: 20
       java: 17
       vars:
-        USER_CODE: ""
+        USER_CODE: "placeholder"
         APP_NAME: "MyApp"
-        PACKAGES: ""
+        PACKAGES: "placeholder"
     cache:
       cache_paths:
         - $HOME/.npm
@@ -65,7 +65,7 @@ workflows:
           cd TempApp
           npm install --legacy-peer-deps
           
-          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "[]" ]; then
+          if [ -n "$PACKAGES" ] && [ "$PACKAGES" != "placeholder" ]; then
             echo "📦 Installing custom packages..."
             echo "$PACKAGES" | base64 -d > /tmp/packages.txt 2>/dev/null || true
             if [ -s /tmp/packages.txt ]; then
